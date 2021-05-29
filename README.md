@@ -54,9 +54,9 @@ echo $LDSC_path > LDSC.config
 Instruction on installing LDSC can be found at https://github.com/bulik/ldsc.
 
 4) Install the C extension CAnnoPred
-'''
+```
 python setup.py install
-'''
+```
 4) Example (when heritability estimation not provided):
 ```
 mkdir test_output ## create dir for output files
