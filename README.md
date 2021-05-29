@@ -91,7 +91,7 @@ The example command parameters mean:
 * --out=test_output/test: a path for output files
 * --temp_dir=tmp_test: a path for saving temporary files generated during the procedure. We suggest using different temp_dir for different dataset.
 
-5) Example (when heritability estimation provided):
+6) Example (when heritability estimation provided):
 ```
 python AnnoPred.py\
   --sumstats=test_data/GWAS_sumstats.txt\
