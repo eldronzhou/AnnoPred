@@ -209,7 +209,7 @@ def main(pdict):
     if pdict['need_ld_radius']: 
       pdict['ld_radius'] = int(ld_r)
     print 'Starting AnnoPred...'
-    pred_main_bak.main(pdict_pred_ldsc(pdict))
+    pred_main.main(pdict_pred_ldsc(pdict))
   else:
     print 'User-provided heritability file found. Extracting SNPs in common...'
     pdict['user_h2_trimmed'] = tmp(pdict, "user_h2_trimmed.txt")
