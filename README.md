@@ -57,7 +57,7 @@ Instruction on installing LDSC can be found at https://github.com/bulik/ldsc.
 ```
 python setup.py install
 ```
-4) Example (when heritability estimation not provided):
+5) Example (when heritability estimation not provided):
 ```
 mkdir test_output ## create dir for output files
 mkdir tmp_test ## create dir for temporary files
