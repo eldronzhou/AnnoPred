@@ -3,9 +3,13 @@
 from argparse import ArgumentParser
 from os.path import isfile, isdir, join
 from sys import exit
+import sys
 
 from annopred import prior_generating, coord_trimmed, pre_sumstats
 from annopred import pred_main, LD_PyWrapper
+
+import cProfile
+import numpy as np
 
 # Create the master argparser and returns the argparser object
 def get_argparser():
@@ -205,7 +209,7 @@ def main(pdict):
     if pdict['need_ld_radius']: 
       pdict['ld_radius'] = int(ld_r)
     print 'Starting AnnoPred...'
-    pred_main.main(pdict_pred_ldsc(pdict))
+    pred_main_bak.main(pdict_pred_ldsc(pdict))
   else:
     print 'User-provided heritability file found. Extracting SNPs in common...'
     pdict['user_h2_trimmed'] = tmp(pdict, "user_h2_trimmed.txt")
@@ -218,5 +222,7 @@ def main(pdict):
 
 
 if __name__ == '__main__':
-  args = get_argparser().parse_args()
-  main(process_args(args))
+    args = get_argparser().parse_args()
+
+    main(process_args(args))
+

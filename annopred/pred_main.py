@@ -32,6 +32,10 @@ from scipy import stats
 import cPickle
 from sklearn import metrics
 
+import pdb 
+import CAnnoPred
+import numpy as np
+import pandas as pd
 
 chromosomes_list = ['chrom_%d'%(x) for x in range(1,23)]
 chromosomes_list.append('chrom_X')
@@ -385,80 +389,9 @@ def non_infinitesimal_mcmc(beta_hats, Pi, Sigi2, sig_12, start_betas=None, h2=No
     """
     MCMC of non-infinitesimal model
     """
-    m = len(beta_hats)
-    
-    curr_betas = sp.copy(start_betas)
-    curr_post_means = sp.zeros(m)
-    avg_betas = sp.zeros(m)
+    c_avg_betas=CAnnoPred.CAnnoPred(beta_hats,Pi,Sigi2,start_betas,sig_12,h2,n,ld_radius,num_iter,burn_in,zero_jump_prob,ld_dict)
 
-    # Iterating over effect estimates in sequential order
-    iter_order = sp.arange(m)
-    
-    for k in range(num_iter):  #Big iteration
-
-        #Force an alpha shrink if estimates are way off compared to heritability estimates.  (Improves MCMC convergence.)
-        h2_est = max(0.00001,sp.sum(curr_betas ** 2))
-        alpha = min(1-zero_jump_prob, 1.0 / h2_est, (h2 + 1 / sp.sqrt(n)) / h2_est)
-        rand_ps = sp.random.random(m)
-
-        for i, snp_i in enumerate(iter_order):
-            if Sigi2[snp_i]==0:
-                curr_post_means[snp_i] = 0
-                curr_betas[snp_i] = 0
-            else:
-                hdmp = (Sigi2[snp_i]/Pi[snp_i])#(h2 / Mp)
-                hdmpn = hdmp + sig_12#1.0 / n
-                hdmp_hdmpn = (hdmp / hdmpn)
-                c_const = (Pi[snp_i] / sp.sqrt(hdmpn))
-                d_const = (1 - Pi[snp_i]) / (sp.sqrt(sig_12))
-    
-                start_i = max(0, snp_i - ld_radius)
-                focal_i = min(ld_radius, snp_i)
-                stop_i = min(m, snp_i + ld_radius + 1)
-                
-                #Local LD matrix
-                D_i = ld_dict[snp_i]
-                
-                #Local (most recently updated) effect estimates
-                local_betas = curr_betas[start_i: stop_i]
-                
-                #Calculate the local posterior mean, used when sampling.
-                local_betas[focal_i] = 0
-                res_beta_hat_i = beta_hats[snp_i] - sp.dot(D_i , local_betas)
-                b2 = res_beta_hat_i ** 2
-        
-                d_const_b2_exp = d_const * sp.exp(-b2 / (2.0*sig_12))
-                if sp.isreal(d_const_b2_exp):
-                    numerator = c_const * sp.exp(-b2 / (2.0 * hdmpn))
-                    if sp.isreal(numerator):
-                        if numerator == 0:
-                            postp = 0
-                        else:
-                            postp = numerator / (numerator + d_const_b2_exp)
-                            assert sp.isreal(postp), 'Posterior mean is not a real number?' 
-                    else:
-                        postp = 0
-                else:
-                    postp = 1
-                curr_post_means[snp_i] = hdmp_hdmpn * postp * res_beta_hat_i
-        
-                if rand_ps[i] < postp * alpha:
-                    #Sample from the posterior Gaussian dist.
-                    proposed_beta = stats.norm.rvs(0, (hdmp_hdmpn) * sig_12, size=1) + hdmp_hdmpn * res_beta_hat_i
-        
-                else:
-                    #Sample 0
-                    proposed_beta = 0
-        
-                curr_betas[snp_i] = proposed_beta  #UPDATE BETA
-
-        if k >= burn_in:
-            avg_betas += curr_post_means #Averaging over the posterior means instead of samples.
-
-    avg_betas = avg_betas/float(num_iter-burn_in)
-
-    return {'betas':avg_betas, 'inf_betas':start_betas}
-
+    return {'betas':c_avg_betas, 'inf_betas':start_betas}
 
 """
 p_dict = {'coord':None, 'ld_radius':None, 'local_ld_file_prefix':None, 'hfile':None, 'pfile':None, 'PS':None, 'out':None,

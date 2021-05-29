@@ -1,8 +1,9 @@
 # AnnoPred
 
-### Update 9/2/2017: 
-### 1. Incorporate new annotations (GenoCanyon, GenoSkyline (7 tissue-specific), GenoSkylinePlus(66 cell-type-specific).
-### 2. Allow total sample size as input. Check out the new user manual and cross-validation pipeline!
+### Update 528/2021: 
+### 1. Converted non_infinitesimal_mcmc to an c extension
+### 2. Incorporate new annotations (GenoCanyon, GenoSkyline (7 tissue-specific), GenoSkylinePlus(66 cell-type-specific).
+### 3. Allow total sample size as input. Check out the new user manual and cross-validation pipeline!
 
 ## Introduction
 This tool predicts disease risk from genotype data using large GWAS summary statistics as training data and integrating functional annotations. The online version of manuscript can be found at http://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1005589.
@@ -52,6 +53,10 @@ echo $LDSC_path > LDSC.config
 ```
 Instruction on installing LDSC can be found at https://github.com/bulik/ldsc.
 
+4) Install the C extension CAnnoPred
+'''
+python setup.py install
+'''
 4) Example (when heritability estimation not provided):
 ```
 mkdir test_output ## create dir for output files
