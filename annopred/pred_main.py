@@ -32,10 +32,7 @@ from scipy import stats
 import cPickle
 from sklearn import metrics
 
-import pdb 
 import CAnnoPred
-import numpy as np
-import pandas as pd
 
 chromosomes_list = ['chrom_%d'%(x) for x in range(1,23)]
 chromosomes_list.append('chrom_X')
@@ -97,7 +94,7 @@ def get_LDpred_ld_tables(snps, ld_radius=100, ld_window_size=0):
     return ret_dict
 
 
-def annopred_inf(beta_hats, pr_sigi, n=1000, reference_ld_mats=None, ld_window_size=100):
+def annopred_inf(beta_hats, pr_sigi, h2,n=1000, reference_ld_mats=None, ld_window_size=100):
     """
     infinitesimal model with snp-specific heritability derived from annotation
     used as the initial values for MCMC of non-infinitesimal model
@@ -110,9 +107,10 @@ def annopred_inf(beta_hats, pr_sigi, n=1000, reference_ld_mats=None, ld_window_s
         start_i = wi
         stop_i = min(num_betas, wi + ld_window_size)
         curr_window_size = stop_i - start_i
-        Li = 1.0/pr_sigi[start_i: stop_i]
+        #Li = 1.0/pr_sigi[start_i: stop_i]
         D = reference_ld_mats[i]
-        A = (n/(1))*D + sp.diag(Li)
+        #A = (n/(1))*D + sp.diag(Li) 
+        A = ((m / h2) * sp.eye(curr_window_size) + (n / (1)) * D) #modification
         A_inv = linalg.pinv(A)
         updated_betas[start_i: stop_i] = sp.dot(A_inv / (1.0/n) , beta_hats[start_i: stop_i])  # Adjust the beta_hats
 
@@ -214,7 +212,7 @@ def annopred_genomewide(data_file=None, ld_radius = None, ld_dict=None, out_file
                 h2_chrom = sp.sum(pr_sig[chrom_str])            
             else:
                 h2_chrom = gw_h2_ld_score_est * (n_snps / float(num_snps))
-            start_betas = annopred_inf(pval_derived_betas, pr_sigi=pr_sig[chrom_str], reference_ld_mats=chrom_ref_ld_mats[chrom_str], n=n, ld_window_size=2*ld_radius)
+            start_betas = annopred_inf(pval_derived_betas, pr_sigi=pr_sig[chrom_str], h2=h2_chrom,reference_ld_mats=chrom_ref_ld_mats[chrom_str], n=n, ld_window_size=2*ld_radius) #modification: add h2
             annopred_inf_chrom_dict[chrom_str]=start_betas
     
     
@@ -384,7 +382,6 @@ def annopred_genomewide(data_file=None, ld_radius = None, ld_dict=None, out_file
                 f.write('%s    %d    %s    %s    %s    %0.4e    %0.4e\n'%(chrom, pos, sid, nt1, nt2, raw_beta, annopred_inf_beta))
 
 
-        
 def non_infinitesimal_mcmc(beta_hats, Pi, Sigi2, sig_12, start_betas=None, h2=None, n=1000, ld_radius=100, num_iter=60, burn_in=10, zero_jump_prob=0.05, ld_dict=None):
     """
     MCMC of non-infinitesimal model
@@ -392,6 +389,7 @@ def non_infinitesimal_mcmc(beta_hats, Pi, Sigi2, sig_12, start_betas=None, h2=No
     c_avg_betas=CAnnoPred.CAnnoPred(beta_hats,Pi,Sigi2,start_betas,sig_12,h2,n,ld_radius,num_iter,burn_in,zero_jump_prob,ld_dict)
 
     return {'betas':c_avg_betas, 'inf_betas':start_betas}
+
 
 """
 p_dict = {'coord':None, 'ld_radius':None, 'local_ld_file_prefix':None, 'hfile':None, 'pfile':None, 'PS':None, 'out':None,
