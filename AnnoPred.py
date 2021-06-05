@@ -10,6 +10,7 @@ from annopred import pred_main, LD_PyWrapper
 
 import cProfile
 import numpy as np
+#import clapack
 
 # Create the master argparser and returns the argparser object
 def get_argparser():

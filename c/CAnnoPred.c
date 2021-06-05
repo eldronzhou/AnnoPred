@@ -3,10 +3,157 @@
 //#include <cmath.h>
 #include <math.h>
 #include <time.h>
+#include "f2c.h"
+#include "clapack.h"
 
 #include <errno.h>
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 
+
+/*
+# modify pinv: instead of x=A^-1B solve system of Ax=B and solve for x
+    # i.e. cholesky decomposition done to solve system
+# store A^-1 before hand (in look up table over curr_window_size)
+    # or precompute and store lower cholesky
+# possibly parallelize if possible
+# curr_window_size range geyu thinks is ld_radius range
+# make software more user friendly
+# annopred_inf into c
+# rob parallel branch of AnnoPred
+    # contains the parallelization
+    # conversion of printf to logging
+    # lots of printf changes, even if each is small
+    # think best way to merge
+    # he suggests possible branch off his*/
+/*
+beta_hats - numpy array (numSnps,1)
+pr_sigi - numpy array (numSnps,1)
+h2 - double
+n - int
+reference_ld_mats - list (numSnps/ld_window_size+1) ith element numpy array square of size min(numSnps, (i+1)*ld_window_size)
+ld_window_size - int
+*/
+
+static PyObject* annopred_inf(PyObject* self, PyObject* args) {
+    /*
+    infinitesimal model with snp-specific heritability derived from annotation
+    used as the initial values for MCMC of non-infinitesimal model
+    */
+    int n, ld_window_size;
+    double h2;
+    PyArrayObject *pao_beta_hats, *pao_pr_sigi;
+    PyListObject *plo_reference_ld_mats;
+    
+    PyObject *po_choleskyFunc,*po_solveFunc;
+    PyObject *po_int;
+    PyArrayObject *pao_A, *pao_b,*pao_updated_betas, *po_D,*pao_L,*pao_x,*pao_y;
+
+    int start_i, stop_i, curr_window_size;
+
+    if (!PyArg_ParseTuple(args, "O!O!diO!i",
+        &PyArray_Type, &pao_beta_hats,
+        &PyArray_Type,&pao_pr_sigi,
+        &h2, 
+        &n,
+        &PyList_Type,&plo_reference_ld_mats,
+        &ld_window_size)) return NULL;
+        
+    pao_beta_hats = (PyArrayObject *)PyArray_ContiguousFromObject((PyObject *)pao_beta_hats, NPY_DOUBLE, 1,1);
+    pao_updated_betas=(PyArrayObject *)PyArray_FromDims(1, (int[]){pao_beta_hats->dimensions[0]}, NPY_DOUBLE);
+
+    pao_pr_sigi = (PyArrayObject *)PyArray_ContiguousFromObject((PyObject *)pao_pr_sigi, NPY_DOUBLE, 1,1);
+
+    po_choleskyFunc=PyDict_GetItemString(PyModule_GetDict(PyImport_AddModule("scipy.linalg")), "cholesky");
+    po_solveFunc=PyDict_GetItemString(PyModule_GetDict(PyImport_AddModule("scipy.linalg")), "solve_triangular");
+    
+    curr_window_size=(int)fmin(ld_window_size,pao_beta_hats->dimensions[0]);
+    pao_A=(PyArrayObject *)PyArray_FromDims(2, (int[]){curr_window_size,curr_window_size}, NPY_DOUBLE);
+    pao_b=(PyArrayObject *)PyArray_FromDims(1, (int[]){curr_window_size}, NPY_DOUBLE);
+
+    int i=0;
+    for(int wi=0;wi<pao_beta_hats->dimensions[0];wi+=ld_window_size) {
+        start_i = wi;
+        stop_i = (int)fmin(pao_beta_hats->dimensions[0], wi + ld_window_size);
+        curr_window_size = stop_i - start_i;
+
+        //Li = 1.0/pr_sigi[start_i: stop_i]
+        po_D = (PyArrayObject *)PyArray_ContiguousFromObject((PyObject *)PyList_GetItem((PyObject *)plo_reference_ld_mats,(Py_ssize_t) i), 
+            NPY_DOUBLE,2,2);
+
+        if (pao_A->dimensions[0]>curr_window_size) {
+            Py_DECREF(pao_A);
+            Py_DECREF(pao_b);
+            pao_A=(PyArrayObject *)PyArray_FromDims(2, (int[]){curr_window_size,curr_window_size}, NPY_DOUBLE);
+            pao_b=(PyArrayObject *)PyArray_FromDims(1, (int[]){curr_window_size}, NPY_DOUBLE);
+        }            
+
+        for (int pos =0;pos<curr_window_size;pos++) {
+            *(double *)(pao_b->data + pos*pao_b->strides[0])=n*(*(double *)(pao_beta_hats->data + (start_i+pos)*pao_beta_hats->strides[0]));
+        }
+       
+        for (int row =0;row<curr_window_size;row++) {
+            for (int col=0;col<curr_window_size;col++) {
+                if (row==col) {
+                    *(double *)(pao_A->data + row*pao_A->strides[0]+col*pao_A->strides[1])=(pao_beta_hats->dimensions[0]/h2)+n *
+                        *(double *)(po_D->data + row*po_D->strides[0]+col*po_D->strides[1]);
+                } else {
+                    *(double *)(pao_A->data + row*pao_A->strides[0]+col*pao_A->strides[1])=n* *(double *)(po_D->data + 
+                        row*po_D->strides[0]+col*po_D->strides[1]);
+                }
+            }
+        }
+
+        Py_DECREF(po_D);
+                
+        //a, lower=False, overwrite_a=False, check_finite=True
+        pao_L=(PyArrayObject *)PyObject_CallFunctionObjArgs(po_choleskyFunc, pao_A,Py_True,Py_False,Py_False, NULL);
+        Py_INCREF(Py_True);
+        Py_INCREF(Py_False);
+        Py_INCREF(Py_False);        
+
+        //a, b, trans=0, lower=False, unit_diagonal=False, overwrite_b=False, debug=None, check_finite=True
+        po_int=PyInt_FromLong(0);
+        pao_x=(PyArrayObject *)PyObject_CallFunctionObjArgs(po_solveFunc, pao_L,pao_b,po_int, Py_True, Py_False, Py_False, Py_False,
+            Py_False,NULL);
+        Py_INCREF(Py_True);
+        Py_INCREF(Py_False);
+        Py_INCREF(Py_False);
+        Py_INCREF(Py_False);
+        Py_INCREF(Py_False);
+        Py_DECREF(po_int);
+
+        //a, b, trans=0, lower=False, unit_diagonal=False, overwrite_b=False, debug=None, check_finite=True
+        po_int=PyInt_FromLong(1);
+        pao_y=(PyArrayObject *)PyObject_CallFunctionObjArgs(po_solveFunc, pao_L,pao_x,po_int, Py_True, Py_False, Py_False, Py_False,
+            Py_False,NULL);
+        Py_INCREF(Py_True);
+        Py_INCREF(Py_False);
+        Py_INCREF(Py_False);
+        Py_INCREF(Py_False);
+        Py_INCREF(Py_False);
+        Py_DECREF(po_int);
+        
+        Py_DECREF(pao_x);
+        Py_DECREF(pao_L);
+        
+        for (int pos=0;pos<curr_window_size;pos++) {
+            *(double *)(pao_updated_betas->data + (pos+start_i)*pao_updated_betas->strides[0])=*(double *)(pao_y->data + 
+                pos*pao_y->strides[0]);
+        }
+
+        Py_DECREF(pao_y);
+        
+        i++;
+    }
+
+    Py_DECREF(pao_beta_hats);
+    Py_DECREF(pao_pr_sigi);
+    Py_DECREF(plo_reference_ld_mats);
+    Py_DECREF(pao_A);
+    Py_DECREF(pao_b);
+    
+    return (PyObject *)pao_updated_betas;
+}
 
 /*
 pao_beta_hats - numpy array (M,)
@@ -22,7 +169,7 @@ burn_in=10 - float
 zero_jump_prob=0.05 - float
 po_ld_dict=None - dict of keys 0 to M-1
 */
-static PyObject* CAnnoPredFunc(PyObject* self, PyObject* args) {
+static PyObject* non_infinitesimal_mcmc(PyObject* self, PyObject* args) {
     PyObject *po_ld_dict;
     PyObject *po_long;
     PyObject *po_randomFunc,*po_randomNormalFunc;
@@ -54,7 +201,7 @@ static PyObject* CAnnoPredFunc(PyObject* self, PyObject* args) {
     int snpSize[] = {numSnps};
 
     // load the functions numpy.random.random into po_randomFunc
-    po_randomStr = PyString_FromString("random");
+    po_randomStr=PyString_FromString("random");
     po_randomFunc=PyDict_GetItem(PyModule_GetDict(PyImport_AddModule("numpy.random")), po_randomStr);   
     Py_DECREF(po_randomStr);
 
@@ -76,7 +223,7 @@ static PyObject* CAnnoPredFunc(PyObject* self, PyObject* args) {
         *(double *)(pao_curr_post_means->data + snp*pao_curr_post_means->strides[0])=0;
         *(double *)(pao_avg_betas->data + snp*pao_avg_betas->strides[0])=0;
     }
-    
+
     // main loop over iterations of mcmc
     for (int iter=0;iter<num_iter;iter++) {
         h2_est=0;
@@ -189,7 +336,8 @@ static PyObject* CAnnoPredFunc(PyObject* self, PyObject* args) {
 }
 
 static PyMethodDef CAnnoPred_funcs[] = {
-    {"CAnnoPred", CAnnoPredFunc, METH_VARARGS, "compute non_infinitesimal_mcmc"},
+    {"non_infinitesimal_mcmc", non_infinitesimal_mcmc, METH_VARARGS, "compute non_infinitesimal_mcmc"},
+    {"annopred_inf", annopred_inf, METH_KEYWORDS, "compute annopred_inf"},
     { NULL, NULL, 0, NULL }
 };
 
