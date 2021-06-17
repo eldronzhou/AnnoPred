@@ -10,6 +10,7 @@ from annopred import pred_main, LD_PyWrapper
 
 import cProfile
 import numpy as np
+import pdb
 #import clapack
 
 # Create the master argparser and returns the argparser object
@@ -198,12 +199,12 @@ def main(pdict):
 #    if isfile()
     ldsc_result = tmp(pdict, pdict['annotation_flag'])
     if not isfile(ldsc_result+'_ldsc.results'):
-      LD_PyWrapper.callLDSC(
-          org_sumstats, pdict['N'], ldsc_result+'_ldsc', pdict['annotation_flag'])
+        LD_PyWrapper.callLDSC(org_sumstats, pdict['N'], ldsc_result+'_ldsc', pdict['annotation_flag'])
     else:
-      print 'LDSC results found! Continue calculating priors ...'
+        print 'LDSC results found! Continue calculating priors ...'
     pdict['h2file'] = tmp(pdict, pdict['annotation_flag'] + "_ldsc_h2.txt")
     pdict['pTfile'] = tmp(pdict, pdict['annotation_flag'] + "_ldsc_pT"+str(pdict['P'])+".txt")
+
     ld_r = prior_generating.generate_h2_pT(
              pdict['coord_out'], ldsc_result+'_ldsc.results', 
              pdict['h2file'], pdict['P'], pdict['pTfile'], pdict['annotation_flag'])
@@ -223,6 +224,7 @@ def main(pdict):
 
 
 if __name__ == '__main__':
+    print 'here'
     args = get_argparser().parse_args()
 
     main(process_args(args))

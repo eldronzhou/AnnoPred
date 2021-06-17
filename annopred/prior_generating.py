@@ -10,6 +10,7 @@ from collections import Counter
 from collections import defaultdict
 import datetime
 import math
+import pdb
 
 def generate_h2_pT(h5py_file, LDSC_results_file, output_h2, PS, output_pT, annotation_flag):
     # generate two types of prior files
@@ -44,7 +45,7 @@ def generate_h2_pT(h5py_file, LDSC_results_file, output_h2, PS, output_pT, annot
     ### get the snp list from h5py ###
     chromosomes_list = ['chrom_%d'%(x) for x in range(1,23)]
     chromosomes_list.append('chrom_X')
-    
+
     df = h5py.File(h5py_file,'r')
     cord_data_g = df['cord_data']
     

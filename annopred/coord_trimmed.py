@@ -11,6 +11,7 @@ from plinkio import plinkfile
 import itertools as it
 import gzip
 import random
+import pdb
 
 ambig_nts = set([('A', 'T'), ('T', 'A'), ('G', 'C'), ('C', 'G')])
 # recode_dict = {'1':'A', '2':'C', '3':'G', '4':'T'}
@@ -1012,7 +1013,7 @@ def main(p_dict):
     if os.path.isfile(p_dict['out']):
         print 'Output file (%s) already exists!  Delete, rename it, or use a different output file.'%(p_dict['out'])
         raise Exception('Output file already exists!')
-        
+
     h5f = h5py.File(p_dict['out'],'w')
     if p_dict['ssf_format']=='STANDARD':
         parse_sum_stats_standard(filename=p_dict['ssf'], bimfile = bimfile, hdf5_file=h5f, n=p_dict['N'])
