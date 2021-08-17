@@ -1,9 +1,12 @@
 ## This script was modified from Dr. Bjarni J. Vilhjalmsson's code (https://bitbucket.org/bjarni_vilhjalmsson/ldpred). We thank him for sharing his code
 
+import logging
+
+
 try: 
     import scipy as sp
 except Exception:
-    print 'Using Numpy instead of Scipy.'
+    logging.debug('Using Numpy instead of Scipy.')
     import numpy as sp
     
 #from numpy import linalg 
@@ -29,17 +32,18 @@ import itertools as it
 import h5py
 import scipy as sp
 from scipy import stats
-import cPickle
+import cPickle, pdb
 from sklearn import metrics
+import multiprocessing
 
 chromosomes_list = ['chrom_%d'%(x) for x in range(1,23)]
 chromosomes_list.append('chrom_X')
 
-@profile
+##@profile
 def pred_accuracy(y_true, y_pred):
     y_true = sp.copy(y_true)
     if len(sp.unique(y_true))==2:
-        print 'dichotomous trait, calculating AUC'
+        logging.debug('dichotomous trait, calculating AUC')
         y_min = y_true.min()
         y_max = y_true.max()
         if y_min!= 0 or y_max!=1:
@@ -49,11 +53,11 @@ def pred_accuracy(y_true, y_pred):
         auc = metrics.auc(fpr, tpr)
         return auc
     else:
-        print 'continuous trait, calculating COR'
+        logging.debug('continuous trait, calculating COR')
         cor = sp.corrcoef(y_true,y_pred)[0,1]
         return cor
 
-@profile
+#@profile
 def get_LDpred_ld_tables(snps, ld_radius=100, ld_window_size=0):
     """
     Calculates LD tables, and the LD score in one go...
@@ -61,7 +65,7 @@ def get_LDpred_ld_tables(snps, ld_radius=100, ld_window_size=0):
     
     ld_dict = {}
     m,n = snps.shape
-    print m,n
+    logging.debug("m %d n %d" % (m,n))
     ld_scores = sp.ones(m)
     ret_dict = {}
     for snp_i, snp in enumerate(snps):
@@ -91,7 +95,8 @@ def get_LDpred_ld_tables(snps, ld_radius=100, ld_window_size=0):
         ret_dict['ref_ld_matrices']=ref_ld_matrices
     return ret_dict
 
-@profile
+
+##@profile
 def annopred_inf(beta_hats, pr_sigi, h2,n=1000, reference_ld_mats=None, ld_window_size=100):
     """
     infinitesimal model with snp-specific heritability derived from annotation
@@ -114,52 +119,35 @@ def annopred_inf(beta_hats, pr_sigi, h2,n=1000, reference_ld_mats=None, ld_windo
 
     return updated_betas
 
-@profile
-def annopred_inf_new(beta_hats, pr_sigi, h2,n=1000, reference_ld_mats=None, ld_window_size=100):
-    """
-    infinitesimal model with snp-specific heritability derived from annotation
-    used as the initial values for MCMC of non-infinitesimal model
-    """
-    num_betas = len(beta_hats)
-    updated_betas = sp.empty(num_betas)
-    m = len(beta_hats)
 
-    for i, wi in enumerate(range(0, num_betas, ld_window_size)):
-        start_i = wi
-        stop_i = min(num_betas, wi + ld_window_size)
-        curr_window_size = stop_i - start_i
-        #Li = 1.0/pr_sigi[start_i: stop_i]
-        D = reference_ld_mats[i]
-        #A = (n/(1))*D + sp.diag(Li) 
-        A = ((m / h2) * sp.eye(curr_window_size) + (n / (1)) * D) #modification
-        b=n*beta_hats[start_i: stop_i]
-        L=sp.linalg.cholesky(A,True,False,False)
-        x=sp.linalg.solve_triangular(L,b,0, True, False, False, False,False)
-        updated_betas[start_i: stop_i]=sp.linalg.solve_triangular(L,x,1, True, False, False, False,False)
+def my_mcmc_wrapper(d):
+    logging.debug('In my_mcmc_wrapper %d' % d['ii'])
+    if os.getenv("AP_setseed"):
+        logging.debug("setting seed")
+        sp.random.seed(d['ii'])
+    res = non_infinitesimal_mcmc(d['beta_hats'], 
+                                  Pi = d['Pi'], 
+                                  Sigi2=d['Sigi2'], 
+                                  sig_12=d['sig_12'], 
+                                  h2=d['h2'], 
+                                  n=d['n'], 
+                                  ld_radius=d['ld_radius'],
+                                  num_iter=d['num_iter'], 
+                                  burn_in=d['burn_in'], 
+                                  ld_dict=d['ld_dict'],
+                                  start_betas=d['start_betas'],
+                                  zero_jump_prob=d['zero_jump_prob'])            
+    logging.debug('Finshed my_mcmc_wrapper %d' % d['ii'])
+    return res
 
-    return updated_betas
-
-@profile
-def annopred_inf_bak(beta_hats, pr_sigi, h2,n=1000, reference_ld_mats=None, ld_window_size=100):
-    t0=time.time()
-    cc=CAnnoPred.annopred_inf(beta_hats, pr_sigi, h2,n, reference_ld_mats, ld_window_size)
-    t1=time.time()
-    py=annopred_inf(beta_hats, pr_sigi, h2,n, reference_ld_mats, ld_window_size)
-    t2=time.time()
-    pyNew=annopred_inf_new(beta_hats, pr_sigi, h2,n, reference_ld_mats, ld_window_size)
-    t3=time.time()
-    print (t1-t0)
-    print (t2-t1)
-    print (t3-t2)
-    
-    return cc
-
-@profile
+##@profile
 def annopred_genomewide(data_file=None, ld_radius = None, ld_dict=None, out_file_prefix=None, ps=None, 
                n=None, h2=None, num_iter=None, zero_jump_prob=0.05, burn_in=5, PRF=None):
     """
     Calculate LDpred for a genome
     """    
+
+    logging.debug('Parallel version')
     prf_chr = PRF['chrom']
     prf_sids = PRF['sids']
     prf_pi = PRF['pi']
@@ -179,7 +167,7 @@ def annopred_genomewide(data_file=None, ld_radius = None, ld_dict=None, out_file
     chrom_ld_dict = ld_dict['chrom_ld_dict']
     chrom_ref_ld_mats = ld_dict['chrom_ref_ld_mats']
         
-    print 'LD radius used: %d' % ld_radius
+    logging.debug('LD radius used: %d' % ld_radius)
     results_dict = {}
     num_snps = 0
     sum_beta2s = 0
@@ -195,24 +183,23 @@ def annopred_genomewide(data_file=None, ld_radius = None, ld_dict=None, out_file
         
     L = ld_scores_dict['avg_gw_ld_score']
     chi_square_lambda = sp.mean(n * sum_beta2s / float(num_snps))
-#    print 'Genome-wide lambda inflation:', chi_square_lambda,
-    print 'Genome-wide mean LD score:', L
+    logging.debug('Genome-wide mean LD score: %s' % str(L))
     gw_h2_ld_score_est = max(0.0001, (max(1, chi_square_lambda) - 1) / (n * (L / num_snps)))
-    print 'Estimated genome-wide heritability:', gw_h2_ld_score_est
+    logging.debug('Estimated genome-wide heritability: %f' % gw_h2_ld_score_est)
     
     #assert chi_square_lambda>1, 'Check the summary statistic file'
     if h2 is None:
         h2 = gw_h2_ld_score_est
-    print h2
+    logging.debug("h2 %f" % h2)
     h2_new = sp.sum(prf_sigi2)
     sig_12 = (1.0)/n     #######################
     pr_sig = {}
     pr_p = {}
     annopred_inf_chrom_dict = {}
-    print 'Calculating initial values for MCMC using infinitesimal model'
+    logging.debug('Calculating initial values for MCMC using infinitesimal model')
     for chrom_str in chromosomes_list:
         if chrom_str in cord_data_g.keys():
-            print 'Calculating posterior betas for Chromosome %s'%((chrom_str.split('_'))[1])           
+            logging.debug('Calculating posterior betas for Chromosome %s'%((chrom_str.split('_'))[1])           )
             g = cord_data_g[chrom_str]
 
             #Filter monomorphic SNPs
@@ -232,14 +219,14 @@ def annopred_genomewide(data_file=None, ld_radius = None, ld_dict=None, out_file
                     pr_p[chrom_str] = sp.copy(prf_pi_chri)
                     pr_sig[chrom_str] = sp.copy(prf_sigi2_chri)
                 else:
-                    print 'Order of SNPs does not match, sorting prior files'
+                    logging.debug('Order of SNPs does not match, sorting prior files')
                     pr_p[chrom_str] = sp.zeros(len(sids))
                     pr_sig[chrom_str] = sp.zeros(len(sids))
                     for i, sid in enumerate(sids):
                         pr_p[chrom_str][i] = prf_pi_chri[prf_sids_chri==sid]
                         pr_sig[chrom_str][i] = prf_sigi2_chri[prf_sids_chri==sid]
             else:
-                print 'More SNPs found in prior file, extracting SNPs from prior files'
+                logging.debug('More SNPs found in prior file, extracting SNPs from prior files')
                 pr_p[chrom_str] = sp.zeros(len(sids))
                 pr_sig[chrom_str] = sp.zeros(len(sids))
                 for i, sid in enumerate(sids):
@@ -250,12 +237,12 @@ def annopred_genomewide(data_file=None, ld_radius = None, ld_dict=None, out_file
                 h2_chrom = sp.sum(pr_sig[chrom_str])            
             else:
                 h2_chrom = gw_h2_ld_score_est * (n_snps / float(num_snps))
-            start_betas = annopred_inf_bak(pval_derived_betas, pr_sigi=pr_sig[chrom_str], h2=h2_chrom,reference_ld_mats=chrom_ref_ld_mats[chrom_str], n=n, ld_window_size=2*ld_radius) #modification: add h2
+            start_betas = annopred_inf(pval_derived_betas, pr_sigi=pr_sig[chrom_str], h2=h2_chrom,reference_ld_mats=chrom_ref_ld_mats[chrom_str], n=n, ld_window_size=2*ld_radius) #modification: add h2
             annopred_inf_chrom_dict[chrom_str]=start_betas
     
     
     for p in ps:
-        print 'Starting AnnoPred with ', p
+        logging.debug('Starting AnnoPred with %f' % p)
         p_str = p
         results_dict[p_str]={}
         
@@ -274,9 +261,13 @@ def annopred_genomewide(data_file=None, ld_radius = None, ld_dict=None, out_file
         out.append('The input prior p is '+str(prf_pi[0])+'\n')
         out.append('Estimated Genome-wide heritability: '+str(gw_h2_ld_score_est)+'\n')
         out.append('Posterior variance for each snp: '+str(sig_12)+'\n')
-        print 'Estimated Genome-wide heritability from Priors:', h2
-        print 'Posterior variance for each snp:', sig_12 
-        for chrom_str in chromosomes_list:
+        logging.debug('Estimated Genome-wide heritability from Priors: %f' % h2)
+        logging.debug('Posterior variance for each snp: %f' % sig_12)
+
+        ### This is the original loop
+        '''
+        for ii, chrom_str in enumerate(chromosomes_list): ## RDB
+            sp.random.seed(ii) ## RDB
             if chrom_str in cord_data_g.keys():
                 g = cord_data_g[chrom_str]
                 if has_phenotypes:
@@ -284,7 +275,7 @@ def annopred_genomewide(data_file=None, ld_radius = None, ld_dict=None, out_file
                         raw_snps = g['raw_snps_val'][...]
                     else:
                         raw_snps = g['raw_snps_ref'][...]
-                    
+                #pdb.set_trace()
                 #Filter monomorphic SNPs
                 snp_stds = g['snp_stds_ref'][...]
                 snp_stds = snp_stds.flatten()
@@ -318,7 +309,7 @@ def annopred_genomewide(data_file=None, ld_radius = None, ld_dict=None, out_file
                     #h2_chrom = h2 * (n_snps / float(num_snps))            
                 else:
                     h2_chrom = gw_h2_ld_score_est * (n_snps / float(num_snps))
-                #print 'Prior parameters: p=%0.3f, n=%d, m=%d, h2_chrom=%0.4f' % (p, n, n_snps, h2_chrom)
+                #logging.debug('Prior parameters: p=%0.3f, n=%d, m=%d, h2_chrom=%0.4f' % (p, n, n_snps, h2_chrom))
                 res_dict = non_infinitesimal_mcmc(pval_derived_betas, Pi = prf_pi_chri_sorted, Sigi2=prf_sigi2_chri_sorted, sig_12=sig_12, h2=h2_chrom, n=n, ld_radius=ld_radius,
                                         num_iter=num_iter, burn_in=burn_in, ld_dict=chrom_ld_dict[chrom_str],
                                         start_betas=annopred_inf_chrom_dict[chrom_str], zero_jump_prob=zero_jump_prob)            
@@ -326,10 +317,10 @@ def annopred_genomewide(data_file=None, ld_radius = None, ld_dict=None, out_file
                 updated_inf_betas = res_dict['inf_betas']
                 sum_sqr_effects = sp.sum(updated_betas ** 2)
                 if sum_sqr_effects>gw_h2_ld_score_est:
-                    print 'Sum of squared updated effects estimates seems too large:', sum_sqr_effects
-                    print 'This suggests that the Gibbs sampler did not convergence.'
+                    logging.debug('Sum of squared updated effects estimates seems too large: %f' % sum_sqr_effects)
+                    logging.debug('This suggests that the Gibbs sampler did not convergence.')
                 
-                print 'Calculating scores for Chromosome %s'%((chrom_str.split('_'))[1])
+                logging.debug('Calculating scores for Chromosome %s'%((chrom_str.split('_'))[1]))
                 updated_betas = updated_betas / (snp_stds.flatten())
                 updated_inf_betas = updated_inf_betas / (snp_stds.flatten())
                 annopred_effect_sizes.extend(updated_betas)
@@ -344,42 +335,157 @@ def annopred_genomewide(data_file=None, ld_radius = None, ld_dict=None, out_file
                     r2 = corr ** 2
                     corr_inf = sp.corrcoef(y, prs_inf)[0, 1]
                     r2_inf = corr_inf ** 2
-#                    print 'The R2 prediction accuracy of PRS using %s was: %0.4f' %(chrom_str, r2)
-#                    print 'The R2 prediction accuracy of PRS using %s was: %0.4f' %(chrom_str, r2_inf)
+#                    logging.debug('The R2 prediction accuracy of PRS using %s was: %0.4f' %(chrom_str, r2))
+#                    logging.debug('The R2 prediction accuracy of PRS using %s was: %0.4f' %(chrom_str, r2_inf))
                     out.append('The R2 prediction accuracy of PRS using '+chrom_str+' was '+str(r2)+'\n')
                     out_inf.append('The R2 prediction accuracy of PRS using '+chrom_str+' was '+str(r2_inf)+'\n')
         
-                    
-#        print 'There were %d (SNP) effects' % num_snps
+           ''' # end of original loop
+
+        ### This part one of the loop.  It gathers what we need for processing each chrom into a dictionary.
+        logging.debug('Starting part 1')
+        jobs = [] # this will a dict for each job
+        # this save some chr specific values we'll need in part 2.
+        snp_stds_save = {}  
+        raw_snps_save = {}
+        job_map={}
+        job_cnt=0
+
+        for ii, chrom_str in enumerate(chromosomes_list): ## RDB
+            if chrom_str in cord_data_g.keys():
+                g = cord_data_g[chrom_str]
+                if has_phenotypes:
+                    if 'raw_snps_val' in g.keys():
+                        raw_snps = g['raw_snps_val'][...]
+                    else:
+                        raw_snps = g['raw_snps_ref'][...]
+                    raw_snps_save[ii]=raw_snps
+                #pdb.set_trace()
+                #Filter monomorphic SNPs
+                snp_stds = g['snp_stds_ref'][...]
+                snp_stds = snp_stds.flatten()
+                snp_stds_save[ii]=snp_stds
+                ok_snps_filter = snp_stds>0
+                snp_stds = snp_stds[ok_snps_filter]
+                pval_derived_betas = g['betas'][...]
+                pval_derived_betas = pval_derived_betas[ok_snps_filter]
+                positions = g['positions'][...]
+                positions = positions[ok_snps_filter]
+                sids = g['sids'][...]
+                sids = sids[ok_snps_filter]
+                log_odds = g['log_odds'][...]
+                log_odds = log_odds[ok_snps_filter]
+                nts = g['nts'][...]
+                nts = nts[ok_snps_filter]
+    
+                prf_pi_chri_sorted = pr_p[chrom_str]
+                prf_sigi2_chri_sorted = pr_sig[chrom_str]
+                
+                if out_file_prefix:
+                    chromosomes.extend([chrom_str]*len(pval_derived_betas))
+                    out_positions.extend(positions)
+                    out_sids.extend(sids)
+                    raw_effect_sizes.extend(log_odds)
+                    out_nts.extend(nts)
+                
+                n_snps = len(pval_derived_betas)
+                
+                if h2 is not None:
+                    h2_chrom = sp.sum(prf_sigi2_chri_sorted)
+                    #h2_chrom = h2 * (n_snps / float(num_snps))            
+                else:
+                    h2_chrom = gw_h2_ld_score_est * (n_snps / float(num_snps))
+                #logging.debug('Prior parameters: p=%0.3f, n=%d, m=%d, h2_chrom=%0.4f' % (p, n, n_snps, h2_chrom))
+
+                jobs.append(dict(zip(['ii', 'beta_hats', 'Pi', 'Sigi2', 'sig_12', 'start_betas', 'h2', 'n', 'ld_radius', 'num_iter', 'burn_in', 'zero_jump_prob', 'ld_dict'], 
+                            [ii, pval_derived_betas, prf_pi_chri_sorted, prf_sigi2_chri_sorted, sig_12, annopred_inf_chrom_dict[chrom_str], h2_chrom, n, ld_radius, 
+                                        num_iter, burn_in, zero_jump_prob, chrom_ld_dict[chrom_str]])))        
+                job_map[ii]=job_cnt
+                job_cnt+=1
+
+        logging.debug('Ending part 1')
+        ## TESTING
+        for job in jobs:
+            logging.debug("job %d size %d" % (job['ii'], len(cPickle.dumps(job))))
+
+        if os.getenv("AP_mode") == 'seq':
+            logging.debug('Starting sequential execution of MCMC with %d jobs' % len(jobs))
+            res_dicts = [my_mcmc_wrapper(j) for j in jobs]
+        else:
+            workers = int(os.getenv("SLURM_CPUS_PER_TASK", 1))
+            logging.debug('Starting parallel execution of MCMC with %d procs, %d jobs' % (workers, len(jobs)))
+            pool = multiprocessing.Pool(processes=workers)
+            res_dicts = pool.map(my_mcmc_wrapper, jobs)
+
+        ## TESTING
+        for iii, res_dict in enumerate(res_dicts):
+            logging.debug("res %d size %d" % (iii, len(cPickle.dumps(res_dict))))
+            
+        logging.debug('Starting Part 2')
+        for ii, chrom_str in enumerate(chromosomes_list): ## RDB
+            if chrom_str in cord_data_g.keys():
+                res_dict=res_dicts[job_map[ii]]
+                updated_betas = res_dict['betas']
+                updated_inf_betas = res_dict['inf_betas']
+                sum_sqr_effects = sp.sum(updated_betas ** 2)
+                if sum_sqr_effects>gw_h2_ld_score_est:
+                    logging.debug('Sum of squared updated effects estimates seems too large: %f' % sum_sqr_effects)
+                    logging.debug('This suggests that the Gibbs sampler did not convergence.')
+                
+                logging.debug('Calculating scores for Chromosome %s'%((chrom_str.split('_'))[1]))
+                ssf = snp_stds_save[ii].flatten()
+                updated_betas = updated_betas / ssf  ### need chr spec snp_stds here
+                updated_inf_betas = updated_inf_betas / ssf
+                annopred_effect_sizes.extend(updated_betas)
+                annopred_inf_effect_sizes.extend(updated_inf_betas)
+
+                if has_phenotypes:
+                    raw_snps=raw_snps_save[ii]
+                    prs = sp.dot(updated_betas, raw_snps)    ### need chr spec raw_snps here
+                    prs_inf = sp.dot(updated_inf_betas, raw_snps)
+                    risk_scores_pval_derived += prs
+                    risk_scores_pval_derived_inf += prs_inf
+                    corr = sp.corrcoef(y, prs)[0, 1]
+                    r2 = corr ** 2
+                    corr_inf = sp.corrcoef(y, prs_inf)[0, 1]
+                    r2_inf = corr_inf ** 2
+#                    logging.debug('The R2 prediction accuracy of PRS using %s was: %0.4f' %(chrom_str, r2))
+#                    logging.debug('The R2 prediction accuracy of PRS using %s was: %0.4f' %(chrom_str, r2_inf))
+                    out.append('The R2 prediction accuracy of PRS using '+chrom_str+' was '+str(r2)+'\n')
+                    out_inf.append('The R2 prediction accuracy of PRS using '+chrom_str+' was '+str(r2_inf)+'\n')
+        
+        logging.debug('Ending part 2')
+         
+#        logging.debug('There were %d (SNP) effects' % num_snps)
         if has_phenotypes:
             num_indivs = len(y)
             results_dict[p_str]['y']=y
             results_dict[p_str]['risk_scores_pd']=risk_scores_pval_derived
-#            print 'Prediction accuracy was assessed using %d individuals.'%(num_indivs)
+#            logging.debug('Prediction accuracy was assessed using %d individuals.'%(num_indivs))
             out.append('Prediction accuracy was assessed using '+str(num_indivs)+' individuals\n')
             
             corr = sp.corrcoef(y, risk_scores_pval_derived)[0, 1]
             r2 = corr ** 2
             results_dict[p_str]['r2_pd']=r2
-#            print 'The  R2 prediction accuracy (observed scale) for the whole genome was: %0.4f (%0.6f)' % (r2, ((1-r2)**2)/num_indivs)
+#            logging.debug('The  R2 prediction accuracy (observed scale) for the whole genome was: %0.4f (%0.6f)' % (r2, ((1-r2)**2)/num_indivs))
             out.append('The  R2 prediction accuracy (observed scale) for the whole genome was: '+str(r2)+' ('+str(((1-r2)**2)/num_indivs)+')\n')
             
             corr_inf = sp.corrcoef(y, risk_scores_pval_derived_inf)[0, 1]
             r2_inf = corr_inf ** 2
             results_dict[p_str]['r2_pd']=r2_inf
-#            print 'The  R2 prediction accuracy (observed scale) for the whole genome was: %0.4f (%0.6f)' % (r2_inf, ((1-r2_inf)**2)/num_indivs)
+#            logging.debug('The  R2 prediction accuracy (observed scale) for the whole genome was: %0.4f (%0.6f)' % (r2_inf, ((1-r2_inf)**2)/num_indivs))
             out_inf.append('The  R2 prediction accuracy (observed scale) for the whole genome was: '+str(r2_inf)+' ('+str(((1-r2_inf)**2)/num_indivs)+')\n')
             
             if corr<0:
                 risk_scores_pval_derived = -1* risk_scores_pval_derived
             auc = pred_accuracy(y,risk_scores_pval_derived)
-            print 'AnnoPred AUC/COR for the whole genome was: %0.4f'%auc
+            logging.debug('AnnoPred AUC/COR for the whole genome was: %0.4f'%auc)
             out.append('AUC/COR for the whole genome was: '+str(auc)+'\n')
     
             if corr_inf<0:
                 risk_scores_pval_derived_inf = -1* risk_scores_pval_derived_inf
             auc_inf = pred_accuracy(y,risk_scores_pval_derived_inf)
-            print 'AnnoPred-inf AUC/COR for the whole genome was: %0.4f'%auc_inf
+            logging.debug('AnnoPred-inf AUC/COR for the whole genome was: %0.4f'%auc_inf)
             out_inf.append('AUC/COR for the whole genome was: '+str(auc_inf)+'\n')
     
             sp.savetxt('%s_y_'%(out_file_prefix)+str(p)+'.txt',y)
@@ -391,7 +497,7 @@ def annopred_genomewide(data_file=None, ld_radius = None, ld_dict=None, out_file
             y_norm = (y-sp.mean(y))/sp.std(y)
             numerator = sp.dot(risk_scores_pval_derived.T, y_norm)
             regression_slope = (numerator / denominator)#[0][0]
-#            print 'The slope for predictions with P-value derived  effects is:',regression_slope
+#            logging.debug('The slope for predictions with P-value derived  effects is: %f' % regression_slope)
             out.append('The slope for predictions with P-value derived  effects is: '+str(regression_slope)+'\n')
             results_dict[p_str]['slope_pd']=regression_slope
     
@@ -420,7 +526,7 @@ def annopred_genomewide(data_file=None, ld_radius = None, ld_dict=None, out_file
                 f.write('%s    %d    %s    %s    %s    %0.4e    %0.4e\n'%(chrom, pos, sid, nt1, nt2, raw_beta, annopred_inf_beta))
 
 
-@profile        
+##@profile        
 def non_infinitesimal_mcmc(beta_hats, Pi, Sigi2, sig_12, start_betas=None, h2=None, n=1000, ld_radius=100, num_iter=60, burn_in=10, zero_jump_prob=0.05, ld_dict=None):
     """
     MCMC of non-infinitesimal model
@@ -505,8 +611,9 @@ p_dict = {'coord':None, 'ld_radius':None, 'local_ld_file_prefix':None, 'hfile':N
           'N':None, 'num_iter': 60, 'H2':None, 'user_h2':None}
 """
 
-@profile
+#@profile
 def main(p_dict):
+    logging.debug("Using pred_main_par")
     local_ld_dict_file = '%s_ldradius%d.pickled.gz'%(p_dict['local_ld_file_prefix'], p_dict['ld_radius'])
     
     p_dict['PS'] = [p_dict['PS']]
@@ -518,12 +625,12 @@ def main(p_dict):
         chrom_ref_ld_mats = {}
         ld_score_sum = 0
         num_snps = 0
-        print 'Calculating LD information w. radius %d'% p_dict['ld_radius']
+        logging.debug('Calculating LD information w. radius %d'% p_dict['ld_radius'])
 
         cord_data_g = df['cord_data']
 
         for chrom_str in cord_data_g.keys():
-            print 'Working on %s'%chrom_str
+            logging.debug('Working on %s'%chrom_str)
             g = cord_data_g[chrom_str]
             if 'raw_snps_ref' in g.keys():
                 raw_snps = g['raw_snps_ref'][...]
@@ -553,25 +660,26 @@ def main(p_dict):
             chrom_ld_scores_dict[chrom_str] = {'ld_scores':ld_scores, 'avg_ld_score':sp.mean(ld_scores)}
             ld_score_sum += sp.sum(ld_scores)
             num_snps += n_snps
+            #if chrom_str=='chrom_20': return ### RDB so I can capture memory profiling before the failure
         avg_gw_ld_score = ld_score_sum / float(num_snps)
         ld_scores_dict = {'avg_gw_ld_score': avg_gw_ld_score, 'chrom_dict':chrom_ld_scores_dict}    
         
-        print 'Done calculating the LD table and LD score, writing to file:', local_ld_dict_file
-        print 'Genome-wide average LD score was:', ld_scores_dict['avg_gw_ld_score']
+        logging.debug('Done calculating the LD table and LD score, writing to file: %s' % local_ld_dict_file)
+        logging.debug('Genome-wide average LD score was: %s' % ld_scores_dict['avg_gw_ld_score'])
         ld_dict = {'ld_scores_dict':ld_scores_dict, 'chrom_ld_dict':chrom_ld_dict, 'chrom_ref_ld_mats':chrom_ref_ld_mats}
         f = gzip.open(local_ld_dict_file, 'wb')
         cPickle.dump(ld_dict, f, protocol=2)
         f.close()
-        print 'LD information is now pickled.'
+        logging.debug('LD information is now pickled.')
     else:
-        print 'Loading LD information from file: %s'%local_ld_dict_file
+        logging.debug('Loading LD information from file: %s'%local_ld_dict_file)
         f = gzip.open(local_ld_dict_file, 'r')
         ld_dict = cPickle.load(f)
         f.close()
 
     if p_dict['user_h2'] is not None:
-        print 'Starting calculation using user provided h2 files as priors'
-        print 'Loading prior information from file: %s'%p_dict['user_h2']
+        logging.debug('Starting calculation using user provided h2 files as priors')
+        logging.debug('Loading prior information from file: %s'%p_dict['user_h2'])
         with open(p_dict['user_h2']) as f:
             data = f.readlines()
         prf_chr = sp.empty(len(data),dtype='int8')
@@ -584,7 +692,7 @@ def main(p_dict):
             prf_sids.append(li[1]) 
             prf_pi[i] = p_dict['PS'][0]         
             prf_sigi2[i] = float(li[2]) 
-        print 'The input prior p is: ', p_dict['PS']
+        logging.debug('The input prior p is: %f ' % p_dict['PS'])
         prf_sids = sp.array(prf_sids,dtype='str')
         prf = {}
         prf['chrom'] = prf_chr
@@ -597,8 +705,8 @@ def main(p_dict):
     else:
         #### no user-provided heritability files provided ####
         ##################### using hfile as prior #######################
-        print 'Starting calculation using h2 files as priors'
-        print 'Loading prior information from file: %s'%p_dict['hfile']
+        logging.debug('Starting calculation using h2 files as priors')
+        logging.debug('Loading prior information from file: %s'%p_dict['hfile'])
         with open(p_dict['hfile']) as f:
             data = f.readlines()
         prf_chr = sp.empty(len(data),dtype='int8')
@@ -611,7 +719,7 @@ def main(p_dict):
             prf_sids.append(li[1]) 
             prf_pi[i] = p_dict['PS'][0]         
             prf_sigi2[i] = float(li[2]) 
-        print 'The input prior p is: ', p_dict['PS']
+        logging.debug('The input prior p is: %s' % str(p_dict['PS']))
         prf_sids = sp.array(prf_sids,dtype='str')
         prf = {}
         prf['chrom'] = prf_chr
@@ -625,8 +733,8 @@ def main(p_dict):
                
         ##################### using pfile as prior #######################
         if p_dict['pfile'] is not None:
-            print 'Starting calculation using p_T files as priors' 
-            print 'Loading prior information from file: %s'%p_dict['pfile']
+            logging.debug('Starting calculation using p_T files as priors' )
+            logging.debug('Loading prior information from file: %s'% str(p_dict['pfile']))
             with open(p_dict['pfile']) as f:
                 data = f.readlines()
             prf_chr = sp.empty(len(data),dtype='int8')
@@ -639,7 +747,7 @@ def main(p_dict):
                 prf_sids.append(li[1]) 
                 prf_pi[i] = float(li[2])         
                 prf_sigi2[i] = float(li[3]) 
-            print 'The input prior p is: ', p_dict['PS']
+            logging.debug('The input prior p is: %s' % str(p_dict['PS']))
             prf_sids = sp.array(prf_sids,dtype='str')
             prf = {}
             prf['chrom'] = prf_chr

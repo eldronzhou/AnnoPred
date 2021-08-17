@@ -2,6 +2,8 @@
 
 from __future__ import print_function
 import subprocess,sys,os
+import logging
+#from memory_profiler import profile
 
 #Formats a list of option tuples of the format (flag, option) into a subprocess-friendly list of strings
 def formatOptions(optsList):
@@ -12,6 +14,7 @@ def formatOptions(optsList):
     return(command)
 
 #Looks for the file LDSC.config to identify the path to LDSC 
+#@profile
 def loadLDPath():
     configPath = os.path.abspath(os.path.join(os.path.dirname(__file__), '..')) + "/LDSC.config"
     if not os.path.isfile(configPath):
@@ -22,18 +25,20 @@ def loadLDPath():
         return ldPath
 
 #Assembles call for munge_sumstats. Returns path to formatted summary statistics in ref/Misc
+#@profile
 def callMunge(sumstats, n_sample, ldPath, refPath):
-    print("Calling munge_sumstats.py...")
+    logging.debug("Calling munge_sumstats.py...")
     mungeFlags = ["--" + flag for flag in ["N", "merge-alleles", "sumstats", "out"]]
     #mungeFlags = ["--" + flag for flag in ["N", "sumstats", "out"]]
     mungeArgs = [n_sample, refPath + "Misc/w_hm3.snplist", sumstats, refPath+"/Misc/Curated_GWAS"]
     #mungeArgs = [n_sample, sumstats, refPath+"/Misc/Curated_GWAS"]
     mungeOptsList = [(f,a) for f,a in zip(mungeFlags, mungeArgs)]
     mungeOpts = formatOptions(mungeOptsList)
-    subprocess.call(["python", ldPath + "/munge_sumstats.py"] + mungeOpts)
+    subprocess.call(["python2.7", ldPath + "/munge_sumstats.py"] + mungeOpts)
     return mungeArgs[3]
 
 #Assembles call to LDSC software. Returns path to SNP heritablility file in ref/Misc
+#@profile
 def callLDSC(sumstats, n_sample, results_path, annotation_flag):
     ldPath = loadLDPath()
     refPath = os.path.abspath(os.path.join(os.path.dirname(__file__), '..')) + "/ref/"
@@ -52,12 +57,12 @@ def callLDSC(sumstats, n_sample, results_path, annotation_flag):
 
     mungeFile = callMunge(sumstats, str(n_sample), ldPath, refPath)
     refFiles = [refPath + a for a in AnnotationPaths]
-    print("Running LD Score calculation...")
+    logging.debug("Running LD Score calculation...")
     ldscFlags = ["--" + flag for flag in ["h2", "ref-ld-chr", "w-ld-chr", "frqfile-chr", "overlap-annot", "print-coefficients", "out"]]
     ldscArgs = [mungeFile + '.sumstats.gz', ','.join(refFiles), refPath+'/Misc/weights.', refPath+'/Misc/1000G.mac5eur.', '', '', results_path]
     ldscOptsList = [(f,a) for f,a in zip(ldscFlags, ldscArgs)]
     ldscOpts = formatOptions(ldscOptsList)
-    subprocess.call(["python", ldPath + "/ldsc.py"] + ldscOpts)
+    subprocess.call(["python2.7", ldPath + "/ldsc.py"] + ldscOpts)
     return ldscArgs[6] + ".results"
 
 if __name__ == "__main__":

@@ -1,17 +1,28 @@
 #!/usr/bin/env python
 
+import os
 from argparse import ArgumentParser
 from os.path import isfile, isdir, join
 from sys import exit
-import sys
+import logging
+import pdb
+import numpy as np
 
 from annopred import prior_generating, coord_trimmed, pre_sumstats
-from annopred import pred_main, LD_PyWrapper
+from annopred import LD_PyWrapper
 
-import cProfile
-import numpy as np
-import pdb
-#import clapack
+from multiprocessing import cpu_count
+#from memory_profiler import profile
+
+if os.getenv("AP_predmain") == 'pred_main_par':
+  logging.info("Using pred_main_par")
+  from annopred import pred_main_par as pred_main
+elif os.getenv("AP_predmain") == 'pred_main_global':
+  logging.info("Using pred_main_global")
+  from annopred import pred_main_global as pred_main
+else:
+  logging.info("Using pred_main_fixed")
+  from annopred import pred_main_c as pred_main
 
 # Create the master argparser and returns the argparser object
 def get_argparser():
@@ -21,9 +32,11 @@ def get_argparser():
   #################### 
   # GWAS sumstats
   parser.add_argument('--sumstats', required=True, help="GWAS summary stats")
+
   # Reference Genotype
   parser.add_argument('--ref_gt', required=True, 
                       help="Reference genotype, plink bed format")
+
   # Validation Genotype
   parser.add_argument('--val_gt', required=True, 
                       help="Validation genotype, plink bed format")
@@ -32,6 +45,7 @@ def get_argparser():
   # For LDSC
   parser.add_argument('--N_sample', required=True, type=int,
                       help="Sample size of GWAS training, for LDSC")
+    
   parser.add_argument('--annotation_flag', required=True,
                       help="Annotation flag: Tier0, Tier1, Tier2 and Tier3")
 
@@ -47,6 +61,7 @@ def get_argparser():
   parser.add_argument('--ld_radius', type=int,
                       help="If not provided, will use the number of SNPs in" 
                            " common divided by 3000")
+
   parser.add_argument('--user_h2', 
                       help="Path to per-SNP heritability."
                            " If not provided, will use LDSC with 53 baseline"
@@ -55,6 +70,7 @@ def get_argparser():
   parser.add_argument('--temp_dir', default=".",
                       help="Directory to output all temporary files."
                            " If not specified, will use the current directory.")
+    
   parser.add_argument('--num_iter', type=int, default=60, 
                       help="Number of iterations for MCMC, default to 60.")
   ## Output Files
@@ -65,6 +81,10 @@ def get_argparser():
   # Output results
   parser.add_argument('--out', default="AnnoPred_out",
                       help="Output filename prefix for AnnoPred")
+
+  # Output results
+  parser.add_argument('--cores', default=cpu_count(), type=int,
+                      help="Enter number of cores to run where applicable")
 
   return parser
 
@@ -123,6 +143,9 @@ def process_args(args):
     exit("Per-SNP H2 file does not exist!")
 
   pdict['out'] = args.out
+
+  pdict['cores']=args.cores
+  
   return pdict
 
 # Returns the path to the file with name in the temp directory
@@ -143,6 +166,7 @@ def pdict_coord_trimmed(pdict):
   d['vbim'] = None
   d['gmdir'] = None
   d['indiv_list'] = None
+  d['cores']= pdict['cores']
   return d
 
 # Returns partially filled pdict used by Pred
@@ -155,6 +179,7 @@ def pdict_pred_partial(pdict):
   d['num_iter'] = pdict['num_iter']
   d['N'] = pdict['N']
   d['out'] = pdict['out']
+  d['cores']= pdict['cores']
   return d
 
 # Returns pdict used by Pred when using LDSC result
@@ -164,6 +189,7 @@ def pdict_pred_ldsc(pdict):
   d['pfile'] = pdict['pTfile']
   d['H2'] = None
   d['user_h2'] = None
+  d['cores'] = pdict['cores']
   return d
 
 # Returns pdict used by Pred when using user h2
@@ -173,59 +199,67 @@ def pdict_pred_user(pdict):
   d['pfile'] = None
   d['H2'] = pdict['H2']
   d['user_h2'] = pdict['user_h2_trimmed']
+  d['cores'] = pdict['cores']
   return d
 
+#@profile
+#@memprof
 def main(pdict):
   print(pdict)
   # Filter SNPs
-  print 'Filtering Summary Stats...'
+
+  logging.info('Filtering Summary Stats...')
   org_sumstats = pdict['sumstats']
   sumstats_filtered = tmp(pdict, "sumstats_filtered.txt")
   if not isfile(sumstats_filtered):
     pre_sumstats.get_1000G_snps(pdict['sumstats'], sumstats_filtered)
     pdict['sumstats'] = sumstats_filtered
   else:
-    print 'Filtered sumstats found, start coordinating genotypes...'
+    logging.debug('Filtered sumstats found, start coordinating genotypes...')
 
   # Generate coord_genotypes H5 file
-  print 'Coordinate summary stats and validation/reference genotype data...'
+  logging.debug('Coordinate summary stats and validation/reference genotype data...')
   if not isfile(pdict_coord_trimmed(pdict)['out']):
     coord_trimmed.main(pdict_coord_trimmed(pdict))
   else:
-    print 'Coord file already exists! Continue calculating priors...'
+    logging.debug('Coord file already exists! Continue calculating priors...')
 
   if pdict['need_LDSC']:
-    print 'User-provided heritability file not found. Generating priors...'
+    logging.debug('User-provided heritability file not found. Generating priors...')
 #    if isfile()
     ldsc_result = tmp(pdict, pdict['annotation_flag'])
     if not isfile(ldsc_result+'_ldsc.results'):
-        LD_PyWrapper.callLDSC(org_sumstats, pdict['N'], ldsc_result+'_ldsc', pdict['annotation_flag'])
+      LD_PyWrapper.callLDSC(
+          org_sumstats, pdict['N'], ldsc_result+'_ldsc', pdict['annotation_flag'])
     else:
-        print 'LDSC results found! Continue calculating priors ...'
+      logging.debug('LDSC results found! Continue calculating priors ...')
     pdict['h2file'] = tmp(pdict, pdict['annotation_flag'] + "_ldsc_h2.txt")
     pdict['pTfile'] = tmp(pdict, pdict['annotation_flag'] + "_ldsc_pT"+str(pdict['P'])+".txt")
-
-    ld_r = prior_generating.generate_h2_pT(
-             pdict['coord_out'], ldsc_result+'_ldsc.results', 
-             pdict['h2file'], pdict['P'], pdict['pTfile'], pdict['annotation_flag'])
+    ld_r = 2361#prior_generating.generate_h2_pT(
+             #pdict['coord_out'], ldsc_result+'_ldsc.results', 
+             #pdict['h2file'], pdict['P'], pdict['pTfile'], pdict['annotation_flag'])
     if pdict['need_ld_radius']: 
       pdict['ld_radius'] = int(ld_r)
-    print 'Starting AnnoPred...'
+    logging.info('Starting AnnoPred...')
     pred_main.main(pdict_pred_ldsc(pdict))
   else:
-    print 'User-provided heritability file found. Extracting SNPs in common...'
+    logging.debug('User-provided heritability file found. Extracting SNPs in common...')
     pdict['user_h2_trimmed'] = tmp(pdict, "user_h2_trimmed.txt")
-    pdict['H2'], ld_r = prior_generating.generate_h2_from_user(
-           pdict['user_h2'], pdict['coord_out'], pdict['user_h2_trimmed'])
+    pdict['H2'], ld_r = prior_generating.generate_h2_from_user(pdict['user_h2'], pdict['coord_out'], pdict['user_h2_trimmed'])
     if pdict['need_ld_radius']:
       pdict['ld_radius'] = int(ld_r)
-    print 'Starting AnnoPred...'
+    logging.info('Starting AnnoPred...')
     pred_main.main(pdict_pred_user(pdict))
 
 
 if __name__ == '__main__':
-    print 'here'
-    args = get_argparser().parse_args()
+  #snps=np.loadtxt('snps',delimiter=',')
+  #pred_main.get_LDpred_ld_tables(snps,2361,4722)
 
-    main(process_args(args))
+  args = get_argparser().parse_args()
 
+  # set up logging
+  logging.basicConfig(level="DEBUG", format='%(asctime)s %(relativeCreated)s %(levelname)s %(threadName)s %(filename)s:%(lineno)d - %(message)s')
+
+  main(process_args(args))
+  

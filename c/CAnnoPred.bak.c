@@ -30,149 +30,276 @@
     printf("\n");
     
 */
-
+/* 
+raw_snps  - np.array NPY_INT8
+snp_stds - np.array 
+snp_means - 
+ld_radius - int
+ld_window_size - int
+*/
 static PyObject* get_LDpred_ld_tables(PyObject* self, PyObject* args) {
-    int i_ld_radius,i_window_size,i_m, i_n, i_temp, i_start, i_stop;
-    float f_sigma, f_mu;
-    double d_avg_ld_score, d_temp;
-    PyObject *pao_snps, *pao_snp, *pao_arg_raw_snps,*pao_arg_snp_stds,*pao_arg_snp_means,*pao_X, *pao_prod;
-    PyObject *po_float;
+    int i_m,i_n,i_ld_radius,i_ld_window_size, i_start,i_stop,i_num_ok_snps,i_temp;
+    Py_ssize_t pst_list_count;
+    double d_avg_ld_score,d_temp,d_n;
+    PyObject *pao_ld_scores, *pao_snps, *pao_D,*pao_arg_raw_snps,*pao_arg_snp_stds,*pao_arg_snp_means;
+    PyObject **ppao_D_i;
     PyObject *pdo_out;
-    PyObject *plo_ref_ld_matrices, *plo_ld_matrices, *plo_ld_scores;
+    PyObject *plo_D, *plo_D_i;
+    PyObject *po_float;
     
-    npy_intp dim2[2], dim1[2];
-        
-    char *pc_snps_0, *pc_snps_1, *pc_arg_raw_snps_0, *pc_arg_raw_snps_1, *pc_arg_snp_means_0, *pc_arg_snp_stds_0;
+    char *pc_snps_0, *pc_snps_1, *pc_snps_2, *pc_snps_1_1, *pc_snps_2_1, *pc_ld_scores_1, *pc_D_i_1, *pc_arg_raw_snps_0, 
+        *pc_arg_raw_snps_1, *pc_arg_snp_stds_1, *pc_arg_snp_means_1, *pc_D_ij_1, *pc_D_ji_1, *pc_D_ij_2, *pc_D_ji_2;
+    
+    npy_intp dim2[2], dim1[1];
 
     if (!PyArg_ParseTuple(args, "O!O!O!ii",&PyArray_Type, &pao_arg_raw_snps,&PyArray_Type, &pao_arg_snp_means,&PyArray_Type, 
-                          &pao_arg_snp_stds,&i_ld_radius,&i_window_size)) return NULL;
+                          &pao_arg_snp_stds,&i_ld_radius,&i_ld_window_size)) return NULL;
 
-    pdo_out=PyDict_New();
     po_float=PyObject_CallFunctionObjArgs(PyDict_GetItemString(PyModule_GetDict(PyImport_AddModule("time")), "time"), NULL);
     PyObject_Print(po_float,stdout,Py_PRINT_RAW);
     Py_DECREF(po_float);
-    printf("\n");
-    
-    i_m=0;
-    pc_arg_snp_stds_0=PyArray_BYTES((PyArrayObject*)pao_arg_snp_stds);
+    printf(" 1 \n"); //1
+    i_num_ok_snps=0;
     for(int row=0;row<PyArray_DIMS((PyArrayObject*)pao_arg_snp_stds)[0];row++) {
-        i_m+=(((float *)pc_arg_snp_stds_0)[0]>0)?1:0;
-        pc_arg_snp_stds_0+=PyArray_STRIDES((PyArrayObject*)pao_arg_snp_stds)[0];
+        i_num_ok_snps+=(((float *)PyArray_GETPTR1((PyArrayObject*)pao_arg_snp_stds, row))[0]>0)?1:0;
     }
     
-    i_n=PyArray_DIMS((PyArrayObject*)pao_arg_raw_snps)[1];
-    
-    dim2[0]=i_m;
-    dim2[1]=i_n;
-    
+    dim2[0]=i_num_ok_snps;
+    dim2[1]=PyArray_DIMS((PyArrayObject*)pao_arg_raw_snps)[1];
     pao_snps=PyArray_SimpleNew(2, dim2, NPY_DOUBLE);
 
     pc_arg_raw_snps_0=PyArray_BYTES((PyArrayObject*)pao_arg_raw_snps);
-    pc_arg_snp_stds_0=PyArray_BYTES((PyArrayObject*)pao_arg_snp_stds);
-    pc_arg_snp_means_0=PyArray_BYTES((PyArrayObject*)pao_arg_snp_means);
+    pc_arg_snp_stds_1=PyArray_BYTES((PyArrayObject*)pao_arg_snp_stds);
+    pc_arg_snp_means_1=PyArray_BYTES((PyArrayObject*)pao_arg_snp_means);
     pc_snps_0=PyArray_BYTES((PyArrayObject*)pao_snps);
     
     for(int row=0;row<PyArray_DIMS((PyArrayObject*)pao_arg_raw_snps)[0];row++) {
-        if (((float *)pc_arg_snp_stds_0)[0]>0) {                        
-            f_mu=((float *)pc_arg_snp_means_0)[0];
-            f_sigma=((float *)pc_arg_snp_stds_0)[0]*sqrt(i_n);
-            
+        if (((float *)pc_arg_snp_stds_1)[0]>0) {            
             pc_arg_raw_snps_1=pc_arg_raw_snps_0;
             pc_snps_1=pc_snps_0;
-            for(int col=0;col<i_n;col++){ 
-                ((double *)pc_snps_1)[0]=(((signed char *)pc_arg_raw_snps_1)[0]-f_mu)/f_sigma;
+            
+            for(int col=0;col<dim2[1];col++){ 
+                ((double *)pc_snps_1)[0]=(((signed char *)pc_arg_raw_snps_1)[0]-((float *)pc_arg_snp_means_1)[0])/((float *)pc_arg_snp_stds_1)[0];
                 pc_arg_raw_snps_1+=PyArray_STRIDES((PyArrayObject*)pao_arg_raw_snps)[1];
                 pc_snps_1+=PyArray_STRIDES((PyArrayObject*)pao_snps)[1];
             }
                         
-            pc_snps_0+=PyArray_STRIDES((PyArrayObject *)pao_snps)[0];
+            pc_snps_0+=PyArray_STRIDES((PyArrayObject*)pao_snps)[0];
         }
         
-        pc_arg_snp_stds_0+=PyArray_STRIDES((PyArrayObject*)pao_arg_snp_stds)[0];
-        pc_arg_snp_means_0+=PyArray_STRIDES((PyArrayObject*)pao_arg_snp_means)[0];
+        pc_arg_snp_stds_1+=PyArray_STRIDES((PyArrayObject*)pao_arg_snp_stds)[0];
+        pc_arg_snp_means_1+=PyArray_STRIDES((PyArrayObject*)pao_arg_snp_means)[0];
         pc_arg_raw_snps_0+=PyArray_STRIDES((PyArrayObject*)pao_arg_raw_snps)[0];
     }
+    
+    pdo_out=PyDict_New();
+
+    i_m=PyArray_DIMS((PyArrayObject*)pao_snps)[0];
+    i_n=PyArray_DIMS((PyArrayObject*)pao_snps)[1];
+    d_n=(double)i_n;
+    
+    dim1[0]=i_m;
+    pao_ld_scores=PyArray_SimpleNew(1, dim1, NPY_DOUBLE);
+    plo_D=PyList_New((npy_intp)(1+(i_m-1.0)/max(1,i_ld_window_size)));
+    plo_D_i=PyList_New((npy_intp)i_m);
+
     po_float=PyObject_CallFunctionObjArgs(PyDict_GetItemString(PyModule_GetDict(PyImport_AddModule("time")), "time"), NULL);
     PyObject_Print(po_float,stdout,Py_PRINT_RAW);
     Py_DECREF(po_float);
-    printf("\n");
+    printf(" 2 \n"); //2
     
-    plo_ref_ld_matrices=PyList_New(1+(npy_intp)floor((i_m-1.0)/max(1,i_window_size)));
-    plo_ld_scores=PyList_New(i_m);
-    plo_ld_matrices=PyList_New(i_m);
+    ppao_D_i=(PyObject **)malloc(i_m*sizeof(PyObject *));
+    
+    dim1[0]=min(i_ld_radius+1,i_m);
+    for(int ind=0;ind<i_ld_radius;ind++){
+        ppao_D_i[ind]=PyArray_New(&PyArray_Type, 1, dim1, NPY_DOUBLE, NULL, NULL, 0, NPY_ARRAY_INOUT_ARRAY, NULL);
+        dim1[0]++;
+    }
+    
+    
+    for (int ind=i_ld_radius;ind<i_m-i_ld_radius;ind++){
+        ppao_D_i[ind]=PyArray_New(&PyArray_Type, 1, dim1, NPY_DOUBLE, NULL, NULL, 0, NPY_ARRAY_INOUT_ARRAY, NULL);
+    }
+    
+    for(int ind=i_m-i_ld_radius;ind<i_m;ind++) {
+        dim1[0]--;
+        ppao_D_i[ind]=PyArray_New(&PyArray_Type, 1, dim1, NPY_DOUBLE, NULL, NULL, 0, NPY_ARRAY_INOUT_ARRAY, NULL);
+    }
+
+    po_float=PyObject_CallFunctionObjArgs(PyDict_GetItemString(PyModule_GetDict(PyImport_AddModule("time")), "time"), NULL);
+    PyObject_Print(po_float,stdout,Py_PRINT_RAW);
+    Py_DECREF(po_float);
+    printf(" 3 \n"); //3
+
+    double pd_temp[i_ld_radius+1];
+    pc_snps_0=PyArray_BYTES((PyArrayObject*)pao_snps);
+    
+    for (int ind1=0;ind1<i_m;ind1++){
+        i_start=max(0,ind1 - i_ld_radius);
+        i_stop=min(i_m, ind1 + i_ld_radius + 1);
+        i_temp=ind1-i_start;
+        
+        for (int delta=0;delta<i_stop-ind1;delta++) {
+            pd_temp[delta]=0;
+        }
+        
+        pc_snps_1=pc_snps_0;
+        for(int col=0;col<i_n;col++) {
+            d_temp=((double *)pc_snps_1)[0];
+            pd_temp[0]+=d_temp*d_temp;
+            
+            pc_snps_2=pc_snps_1;
+            for(int delta=1;delta<i_stop-ind1;delta++){   
+                pc_snps_2+=PyArray_STRIDES((PyArrayObject*)pao_snps)[0];
+                //pd_temp[delta]+=0;//d_temp*((double *)pc_snps_2)[0];
+                ((double *)pc_snps_2)[0]=0;
+            }
+            
+            pc_snps_1+=PyArray_STRIDES((PyArrayObject*)pao_snps)[1];
+        }        
+        
+        pc_D_i_1=PyArray_BYTES((PyArrayObject*)ppao_D_i[ind1])+i_temp*PyArray_STRIDES((PyArrayObject*)ppao_D_i[ind1])[0];
+        for (int delta=0;delta<i_stop-ind1;delta++) {
+            ((double *)pc_D_i_1)[0]=pd_temp[delta]/d_n;
+
+            pc_D_i_1+=PyArray_STRIDES((PyArrayObject*)ppao_D_i[ind1])[0];
+        }
+        
+        pc_D_i_1=PyArray_BYTES((PyArrayObject*)ppao_D_i[ind1])+i_temp*PyArray_STRIDES((PyArrayObject*)ppao_D_i[ind1])[0];
+        for (int delta=1;delta<=min(ind1-i_start,i_m-ind1);delta++) {
+            pc_D_i_1-=PyArray_STRIDES((PyArrayObject*)ppao_D_i[ind1])[0];
+            ((double *)pc_D_i_1)[0]=((double *)PyArray_GETPTR1((PyArrayObject*)ppao_D_i[ind1-delta],ind1-max(0,ind1-delta-i_ld_radius)))[0];
+        }
+        
+        pc_snps_0+=PyArray_STRIDES((PyArrayObject*)pao_snps)[0];
+    }
+    
+    po_float=PyObject_CallFunctionObjArgs(PyDict_GetItemString(PyModule_GetDict(PyImport_AddModule("time")), "time"), NULL);
+    PyObject_Print(po_float,stdout,Py_PRINT_RAW);
+    Py_DECREF(po_float);
+    printf(" 8 \n"); //8
+    
+    pc_ld_scores_1=PyArray_BYTES((PyArrayObject*)pao_ld_scores);
+    
+    for (int ind=0;ind<i_m;ind++){
+        pd_temp[0]=0;
+        pc_D_i_1=PyArray_BYTES((PyArrayObject*)ppao_D_i[ind]);
+        
+        for(int loc=0;loc<PyArray_DIMS((PyArrayObject*)ppao_D_i[ind])[0];loc++) {
+            pd_temp[0]+=((double *)pc_D_i_1)[0]*((double *)pc_D_i_1)[0];
+            pc_D_i_1+=PyArray_STRIDES((PyArrayObject*)ppao_D_i[ind])[0];
+        }
+        
+        pd_temp[0]=pd_temp[0]*(1.0+1.0/(d_n-2.0))-(PyArray_DIMS((PyArrayObject*)ppao_D_i[ind])[0]/(d_n-2.0));
+        
+        ((double *)pc_ld_scores_1)[0]=pd_temp[0];       
+        pc_ld_scores_1+=PyArray_STRIDES((PyArrayObject*)pao_ld_scores)[0];
+        
+        //PyList_SetItem(plo_D_i, ind, ppao_D_i[ind]);  
+    }
+    
+    po_float=PyObject_CallFunctionObjArgs(PyDict_GetItemString(PyModule_GetDict(PyImport_AddModule("time")), "time"), NULL);
+    PyObject_Print(po_float,stdout,Py_PRINT_RAW);
+    Py_DECREF(po_float);
+    printf(" 4 \n"); //4
     
     d_avg_ld_score=0;
-    i_temp=0;
-    pc_snps_0=PyArray_BYTES((PyArrayObject*)pao_snps);
-    pc_snps_1=pc_snps_0;
-    dim1[0]=1;
-    dim1[1]=i_n;
-    for (int ind=0;ind<i_m;ind++){ 
-        i_start=max(0,ind - i_ld_radius);
-        i_stop=min(i_m, ind + i_ld_radius + 1);
+    pc_ld_scores_1=PyArray_BYTES((PyArrayObject*)pao_ld_scores);
+    for(int row=0;row<PyArray_DIMS((PyArrayObject*)pao_ld_scores)[0];row++) {
+        d_avg_ld_score+=((double *)pc_ld_scores_1)[0];
+        pc_ld_scores_1+=PyArray_STRIDES((PyArrayObject*)pao_ld_scores)[0];
+    }
+    d_avg_ld_score/=PyArray_DIMS((PyArrayObject*)pao_ld_scores)[0];
+    
+    po_float=PyObject_CallFunctionObjArgs(PyDict_GetItemString(PyModule_GetDict(PyImport_AddModule("time")), "time"), NULL);
+    PyObject_Print(po_float,stdout,Py_PRINT_RAW);
+    Py_DECREF(po_float);
+    printf(" 5 \n"); //5
+    
+    if (i_ld_window_size>0) {
+        pst_list_count=0;
 
-        pao_snp=PyArray_SimpleNewFromData(2, dim1, NPY_DOUBLE, pc_snps_0);
+        pc_snps_0=PyArray_BYTES((PyArrayObject*)pao_snps);
         
-        dim2[0]=(i_stop-i_start); 
-        
-        if (ind>i_ld_radius) pc_snps_1+=PyArray_STRIDES((PyArrayObject*)pao_snps)[0];
-        pao_X=PyArray_SimpleNewFromData(2, dim2, NPY_DOUBLE, pc_snps_1);
-        
-        pao_prod=PyArray_MatrixProduct(pao_X,PyArray_Transpose((PyArrayObject *)pao_snp,NULL));
-        
-        PyArray_ScalarAsCtype(PyArray_Return((PyArrayObject*)PyArray_InnerProduct(pao_prod,pao_prod)),&d_temp);
-        
-        d_temp=(d_temp*(i_n-1)-PyArray_DIMS((PyArrayObject*)pao_X)[0])/(i_n-2);
-        
-        d_avg_ld_score+=d_temp;
+        for(int wi=0;wi<i_m;wi+=i_ld_window_size) {
+            pc_snps_1=pc_snps_0;
+
+            i_start=wi;
+            i_stop=min(i_m,wi+i_ld_window_size);
+            
+            dim2[0]=i_stop-i_start;
+            dim2[1]=i_stop-i_start;
+            pao_D=PyArray_SimpleNew(2, dim2, NPY_DOUBLE);
+            
+            pc_D_ij_1=PyArray_BYTES((PyArrayObject*)pao_D);
+            pc_D_ji_1=PyArray_BYTES((PyArrayObject*)pao_D);
+            
+            for(int i=0;i<i_stop-i_start;i++) {
+                pc_snps_2=pc_snps_0;
+                
+                pc_D_ij_2=pc_D_ij_1;
+                pc_D_ji_2=pc_D_ji_1;
+                
+                for(int j=0;j<i_stop-i_start;j++) {
+                    if (j>=i) {
+                        pd_temp[0]=0;
+                        pc_snps_1_1=pc_snps_1;
+                        pc_snps_2_1=pc_snps_2;
+                        
+                        for(int col=0;col<i_n;col++) {
+                            pd_temp[0]+=((double *)pc_snps_1_1)[0]*((double *)pc_snps_2_1)[0];
+                            pc_snps_1_1+=PyArray_STRIDES((PyArrayObject*)pao_snps)[1];
+                            pc_snps_2_1+=PyArray_STRIDES((PyArrayObject*)pao_snps)[1];
                             
-        PyList_SetItem(plo_ld_matrices, i_temp, pao_prod);
-        PyList_SetItem(plo_ld_scores, i_temp, PyFloat_FromDouble(d_temp));
-        
-        i_temp++;
-        pc_snps_0+=PyArray_STRIDES((PyArrayObject*)pao_snps)[0];
-    }        
-    po_float=PyObject_CallFunctionObjArgs(PyDict_GetItemString(PyModule_GetDict(PyImport_AddModule("time")), "time"), NULL);
-    PyObject_Print(po_float,stdout,Py_PRINT_RAW);
-    Py_DECREF(po_float);
-    printf("\n");
-    
-    Py_INCREF(Py_None);
-    return Py_None;
-    
-    i_temp=0;
-    pc_snps_0=PyArray_BYTES((PyArrayObject*)pao_snps);    
-    for (int ind=0;ind<i_m;ind+=i_window_size){
-        dim2[0]=min(i_m, ind + i_window_size)-ind;
-        
-        pao_X=PyArray_SimpleNewFromData(2, dim2, NPY_DOUBLE, pc_snps_0);
-
-        pao_prod=PyArray_MatrixProduct(pao_X,PyArray_Transpose((PyArrayObject *)pao_X,NULL));
-
-        PyList_SetItem(plo_ref_ld_matrices, i_temp, pao_prod);
-        
-        i_temp++;
-        pc_snps_0+=i_window_size*PyArray_STRIDES((PyArrayObject*)pao_snps)[0];
-    }        
+                            //((double *)PyArray_GETPTR2((PyArrayObject*)pao_snps, i_start+i, col))[0]*((double *)PyArray_GETPTR2(
+                            //    (PyArrayObject*)pao_snps, i_start+j, col))[0];
+                        }
+                        pd_temp[0]/=d_n;
+                    } else {
+                        pd_temp[0]=((double *)pc_D_ji_2)[0];
+                        //((double *)PyArray_GETPTR2((PyArrayObject*)pao_D, j,i))[0];
+                    }
+                    
+                    ((double *)pc_D_ij_2)[0]=pd_temp[0];
+                    //((double *)PyArray_GETPTR2((PyArrayObject*)pao_D, i,j))[0]
+                    
+                    pc_snps_2+=PyArray_STRIDES((PyArrayObject*)pao_snps)[0];
+                    pc_D_ij_2+=PyArray_STRIDES((PyArrayObject*)pao_D)[1];
+                    pc_D_ji_2+=PyArray_STRIDES((PyArrayObject*)pao_D)[0];
+                }
+                
+                pc_snps_1+=PyArray_STRIDES((PyArrayObject*)pao_snps)[0];
+                pc_D_ij_1+=PyArray_STRIDES((PyArrayObject*)pao_D)[0];
+                pc_D_ji_1+=PyArray_STRIDES((PyArrayObject*)pao_D)[1];
+            }
+            
+            PyList_SetItem(plo_D, pst_list_count++,pao_D);
+            pc_snps_0+=i_ld_window_size*PyArray_STRIDES((PyArrayObject*)pao_snps)[0];
+        }
+    }
     
     po_float=PyObject_CallFunctionObjArgs(PyDict_GetItemString(PyModule_GetDict(PyImport_AddModule("time")), "time"), NULL);
     PyObject_Print(po_float,stdout,Py_PRINT_RAW);
     Py_DECREF(po_float);
-    printf("\n");
-
-    PyDict_SetItemString(pdo_out, "ref_ld_matrices", plo_ref_ld_matrices);
-    PyDict_SetItemString(pdo_out, "ld_scores", plo_ld_scores);
-    PyDict_SetItemString(pdo_out, "ld_matrices", plo_ld_matrices);
+    printf(" 6 \n"); //6
+    
+    PyDict_SetItemString(pdo_out, "D",plo_D);  
+    PyDict_SetItemString(pdo_out, "D_i", plo_D_i);
+    PyDict_SetItemString(pdo_out, "ld_scores", pao_ld_scores);
     
     po_float=PyFloat_FromDouble(d_avg_ld_score);
     PyDict_SetItemString(pdo_out, "avg_ld_score", po_float);
     Py_DECREF(po_float);
     
-    Py_DECREF(plo_ld_scores);
-    Py_DECREF(plo_ld_matrices);
-    Py_DECREF(plo_ref_ld_matrices);
-
+    Py_DECREF(pao_snps);
+    
+    //Py_DECREF(plo_D);
+    Py_DECREF(plo_D_i);
+    Py_DECREF(pao_ld_scores);    
+            
     return pdo_out;
+    //Py_INCREF(Py_None);
+    //return(Py_None);
 }
 
 /*
