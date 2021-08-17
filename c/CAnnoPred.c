@@ -102,6 +102,7 @@ static PyObject* get_LDpred_ld_tables(PyObject* self, PyObject* args) {
     plo_ld_matrices=PyList_New(i_m);
     
     d_avg_ld_score=0;
+    
     i_temp=0;
     pc_snps_0=PyArray_BYTES((PyArrayObject*)pao_snps);
     pc_snps_1=pc_snps_0;

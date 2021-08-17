@@ -449,7 +449,7 @@ def main(p_dict):
 
             ld_radius=p_dict['ld_radius']
             window_size=2*p_dict['ld_radius']
-            pdb.set_trace()
+
             ret_dict=CAnnoPred.get_LDpred_ld_tables(raw_snps,snp_means,snp_stds,ld_radius,window_size)
                 
             t1=time.time()
